@@ -1,7 +1,7 @@
 
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config.settings import Settings, get_settings
@@ -9,6 +9,7 @@ from src.pipeline.orchestrator import AnalysisOrchestrator
 from src.repositories.analysis import AnalysisRepository
 from src.repositories.report import ReportRepository
 from src.services.analysis import AnalysisService
+from src.services.demo_auth import DemoAuthService
 from src.services.geo import GeoService
 from src.services.llm import LLMService
 
@@ -65,3 +66,32 @@ async def provide_analysis_service(
     report_repo = ReportRepository(session)
     analysis_repo = AnalysisRepository(session)
     return AnalysisService(orchestrator, report_repo, analysis_repo)
+
+
+async def provide_demo_auth_service(
+    settings: Settings = Depends(provide_settings),
+) -> DemoAuthService:
+    return DemoAuthService(
+        username=settings.demo_auth_username or "",
+        password=settings.demo_auth_password or "",
+        secret=settings.demo_auth_secret or "",
+        cookie_name=settings.demo_auth_cookie_name,
+    )
+
+
+async def require_demo_auth(
+    request: Request,
+    settings: Settings = Depends(provide_settings),
+    auth: DemoAuthService = Depends(provide_demo_auth_service),
+) -> str | None:
+    if not settings.demo_auth_enabled:
+        return None
+
+    cookie_value = request.cookies.get(settings.demo_auth_cookie_name)
+    username = auth.read_cookie_value(cookie_value)
+    if username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
+    return username

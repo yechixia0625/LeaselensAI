@@ -1,6 +1,7 @@
 import pytest
 
-from src.api.deps import provide_geo_service
+from src.api.deps import provide_geo_service, provide_settings
+from src.config.settings import Settings
 
 
 class StubGeoService:
@@ -52,3 +53,22 @@ async def test_location_resolution_returns_selected_coordinate(client):
     assert response.status_code == 200
     assert response.json()["latitude"] == 31.2304
     assert "api" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_location_autocomplete_requires_auth_when_demo_auth_enabled(client, app):
+    async def override_settings():
+        return Settings(
+            demo_auth_enabled=True,
+            demo_auth_username="demo",
+            demo_auth_password="secret-pass",
+            demo_auth_secret="super-secret-signing-key",
+        )
+
+    app.dependency_overrides[provide_settings] = override_settings
+    response = await client.post(
+        "/api/locations/autocomplete",
+        json={"input": "Market Street", "sessionToken": "session-token-1"},
+    )
+
+    assert response.status_code == 401

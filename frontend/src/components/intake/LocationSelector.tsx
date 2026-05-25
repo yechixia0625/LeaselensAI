@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Crosshair, MapPin, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isUnauthorizedError } from "@/services/authService";
 import { LocationService, type LocationPrediction } from "@/services/locationService";
 import type { SiteLocation } from "@/services/intakeTransfer";
 
@@ -11,11 +12,18 @@ interface LocationSelectorProps {
   onChange: (value: SiteLocation | null) => void;
 }
 
+function createSessionToken() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function LocationSelector({ value, onChange }: LocationSelectorProps) {
   const [mode, setMode] = useState<"current" | "address">("current");
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<LocationPrediction[]>([]);
-  const [sessionToken, setSessionToken] = useState(() => crypto.randomUUID());
+  const [sessionToken, setSessionToken] = useState(createSessionToken);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +37,12 @@ export function LocationSelector({ value, onChange }: LocationSelectorProps) {
       setError(null);
       try {
         setPredictions(await LocationService.autocomplete(query.trim(), sessionToken));
-      } catch {
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          setError("Session expired. Please sign in again.");
+          window.location.href = "/";
+          return;
+        }
         setError("Address suggestions are unavailable.");
       } finally {
         setPending(false);
@@ -44,7 +57,7 @@ export function LocationSelector({ value, onChange }: LocationSelectorProps) {
     setError(null);
     setPredictions([]);
     setQuery("");
-    setSessionToken(crypto.randomUUID());
+    setSessionToken(createSessionToken());
   }
 
   function locateCurrentSite() {
@@ -71,7 +84,12 @@ export function LocationSelector({ value, onChange }: LocationSelectorProps) {
       onChange(resolved);
       setQuery(resolved.siteLabel ?? prediction.text);
       setPredictions([]);
-    } catch {
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        setError("Session expired. Please sign in again.");
+        window.location.href = "/";
+        return;
+      }
       setError("Could not resolve this address.");
     } finally {
       setPending(false);

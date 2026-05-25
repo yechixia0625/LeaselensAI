@@ -1,4 +1,5 @@
 import type { LeaseLensReport } from "@/types/report";
+import { UnauthorizedError } from "./authService";
 import type { AnalysisIntake } from "./intakeTransfer";
 
 export const ANALYSIS_API_PATH = "/api/analyze-space";
@@ -27,8 +28,12 @@ export class AnalysisService {
     const response = await fetch(ANALYSIS_API_PATH, {
       method: "POST",
       body: formData,
+      credentials: "include",
     });
 
+    if (response.status === 401) {
+      throw new UnauthorizedError();
+    }
     if (!response.ok) {
       throw new Error(`Analysis request failed: ${response.status}`);
     }

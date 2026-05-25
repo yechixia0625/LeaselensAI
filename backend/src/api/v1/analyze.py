@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from src.api.deps import provide_analysis_service
+from src.api.deps import provide_analysis_service, require_demo_auth
 from src.models.schemas.intake import SpaceIntakeRequest
 from src.services.analysis import AnalysisService
 
@@ -24,6 +24,7 @@ async def analyze_space(
     latitude: float = Form(..., ge=-90, le=90),
     longitude: float = Form(..., ge=-180, le=180),
     site_label: str | None = Form(None),
+    _username: str | None = Depends(require_demo_auth),
     analysis_service: AnalysisService = Depends(provide_analysis_service),
 ):
     """Analyze a commercial space. Returns SSE stream with agent logs and final report."""

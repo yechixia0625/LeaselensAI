@@ -3,7 +3,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.deps import provide_geo_service
+from src.api.deps import provide_geo_service, require_demo_auth
 from src.models.schemas.location import (
     AutocompleteRequest,
     AutocompleteResponse,
@@ -20,6 +20,7 @@ router = APIRouter(prefix="/locations", tags=["locations"])
 @router.post("/autocomplete", response_model=AutocompleteResponse)
 async def autocomplete_location(
     request: AutocompleteRequest,
+    _username: str | None = Depends(require_demo_auth),
     geo: GeoService = Depends(provide_geo_service),
 ) -> AutocompleteResponse:
     try:
@@ -33,6 +34,7 @@ async def autocomplete_location(
 @router.post("/resolve", response_model=ResolvedLocation)
 async def resolve_location(
     request: ResolveLocationRequest,
+    _username: str | None = Depends(require_demo_auth),
     geo: GeoService = Depends(provide_geo_service),
 ) -> ResolvedLocation:
     try:

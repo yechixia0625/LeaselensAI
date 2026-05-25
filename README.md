@@ -44,6 +44,13 @@ cp .env.example .env
 - `LEASENS_LLM_MODEL`
 - `LEASENS_GOOGLE_PLACES_API_KEY`
 
+如果你准备把系统放到公网测试，建议同时开启演示级登录：
+
+- `LEASENS_DEMO_AUTH_ENABLED=true`
+- `LEASENS_DEMO_AUTH_USERNAME`
+- `LEASENS_DEMO_AUTH_PASSWORD`
+- `LEASENS_DEMO_AUTH_SECRET`
+
 当前项目默认使用智谱 GLM 系列模型，`.env.example` 中默认模型为：
 
 ```text
@@ -83,6 +90,14 @@ docker compose -f docker-compose.portable.yml down
 
 - `LEASENS_GOOGLE_PLACES_API_KEY`：Google Places API (New) 服务端 Key
 - `LEASENS_GOOGLE_PLACES_SEARCH_RADIUS_METERS`：附近搜索半径，单位米
+
+### 演示登录相关
+
+- `LEASENS_DEMO_AUTH_ENABLED`：是否启用公网测试登录
+- `LEASENS_DEMO_AUTH_USERNAME`：统一访客用户名
+- `LEASENS_DEMO_AUTH_PASSWORD`：统一访客密码
+- `LEASENS_DEMO_AUTH_SECRET`：Cookie 签名密钥
+- `LEASENS_DEMO_AUTH_COOKIE_NAME`：登录 Cookie 名称
 
 ### 代理相关
 
@@ -132,6 +147,8 @@ docker compose -f docker-compose.portable.yml down
    - 四个 Agent 的实时分析输出
    - `Decision Plan` 决策型 Blueprint
    - `Live Market` 真实周边地图
+
+如果启用了演示登录，用户访问首页后会先看到一个简单登录页。登录成功后才会进入上传分析界面。
 
 ## 部署验证
 
@@ -243,6 +260,19 @@ docker compose -f docker-compose.portable.yml up --build -d
 ```text
 PUBLIC_HTTP_PORT="8081"
 ```
+
+### 5. 公网测试登录无法使用
+
+排查：
+
+- 确认 `LEASENS_DEMO_AUTH_ENABLED=true`
+- 确认用户名、密码、签名密钥都已配置
+- 修改 `.env` 后重新启动容器
+
+说明：
+
+- 这套登录只用于公网演示和临时测试
+- 它不是生产级鉴权系统
 
 ## 安全说明
 

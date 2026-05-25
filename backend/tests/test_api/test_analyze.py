@@ -1,6 +1,7 @@
 import pytest
 
-from src.api.deps import provide_analysis_service
+from src.api.deps import provide_analysis_service, provide_settings
+from src.config.settings import Settings
 
 
 class StubAnalysisService:
@@ -109,3 +110,28 @@ async def test_analyze_space_rejects_invalid_location_coordinates(client):
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_analyze_space_requires_auth_when_demo_auth_enabled(client, app):
+    async def override_settings():
+        return Settings(
+            demo_auth_enabled=True,
+            demo_auth_username="demo",
+            demo_auth_password="secret-pass",
+            demo_auth_secret="super-secret-signing-key",
+        )
+
+    app.dependency_overrides[provide_settings] = override_settings
+    response = await client.post(
+        "/api/analyze-space",
+        files={"photo": ("unit.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        data={
+            "business_type": "Cafe",
+            "expected_rent": "5200",
+            "square_meters": "80",
+            **VALID_LOCATION,
+        },
+    )
+
+    assert response.status_code == 401

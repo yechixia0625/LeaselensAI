@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,12 +34,40 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     google_places_search_radius_meters: int = 500
 
+    # Demo auth
+    demo_auth_enabled: bool = False
+    demo_auth_username: str | None = None
+    demo_auth_password: str | None = None
+    demo_auth_secret: str | None = None
+    demo_auth_cookie_name: str = "leaselens_demo_session"
+
     # Agent concurrency
     max_concurrent_agents: int = 4
     agent_log_buffer_size: int = 50
 
     # SSE
     sse_heartbeat_interval: int = 15
+
+    @model_validator(mode="after")
+    def validate_demo_auth(self) -> "Settings":
+        if not self.demo_auth_enabled:
+            return self
+
+        missing = [
+            name
+            for name, value in (
+                ("LEASENS_DEMO_AUTH_USERNAME", self.demo_auth_username),
+                ("LEASENS_DEMO_AUTH_PASSWORD", self.demo_auth_password),
+                ("LEASENS_DEMO_AUTH_SECRET", self.demo_auth_secret),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "Demo auth is enabled but required settings are missing: "
+                + ", ".join(missing)
+            )
+        return self
 
 
 @lru_cache

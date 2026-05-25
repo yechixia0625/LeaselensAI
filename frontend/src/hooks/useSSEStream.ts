@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { ANALYSIS_API_PATH } from "@/services/AnalysisService";
+import { UnauthorizedError } from "@/services/authService";
 import { classifySSEPayload } from "@/lib/sse";
 import type { LeaseLensReport } from "@/types/report";
 import type { AgentLogEvent } from "@/types/streaming";
@@ -54,9 +55,13 @@ export function useSSEStream(): UseSSEStreamReturn {
         const response = await fetch(ANALYSIS_API_PATH, {
           method: "POST",
           body: formData,
+          credentials: "include",
           signal: controller.signal,
         });
 
+        if (response.status === 401) {
+          throw new UnauthorizedError();
+        }
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }

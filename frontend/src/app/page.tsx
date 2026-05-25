@@ -1,16 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LoginPanel } from "@/components/auth/LoginPanel";
 import { DropZone } from "@/components/intake/DropZone";
 import { IntakeForm } from "@/components/intake/IntakeForm";
 import { AnalyzeButton } from "@/components/intake/AnalyzeButton";
 import { LocationSelector } from "@/components/intake/LocationSelector";
+import { AuthService } from "@/services/authService";
 import { storePendingAnalysis } from "@/services/intakeTransfer";
 import type { SiteLocation } from "@/services/intakeTransfer";
 
 export default function IntakePage() {
   const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [businessType, setBusinessType] = useState("");
   const [expectedRent, setExpectedRent] = useState("");
@@ -28,6 +32,26 @@ export default function IntakePage() {
     Number(squareMeters) > 0 &&
     location !== null;
 
+  useEffect(() => {
+    let active = true;
+    AuthService.session()
+      .then((session) => {
+        if (!active) return;
+        setAuthenticated(session.authenticated);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuthenticated(false);
+      })
+      .finally(() => {
+        if (active) setAuthChecked(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const handleAnalyze = () => {
     if (!canAnalyze) return;
 
@@ -43,6 +67,22 @@ export default function IntakePage() {
 
     router.push("/workspace");
   };
+
+  if (!authChecked) {
+    return (
+      <main className="min-h-screen blueprint-grid flex items-center justify-center p-8">
+        <div className="font-mono text-xs tracking-[0.18em] text-zinc-500">CHECKING SESSION...</div>
+      </main>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <main className="min-h-screen blueprint-grid flex items-center justify-center p-8">
+        <LoginPanel onSuccess={() => setAuthenticated(true)} />
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen blueprint-grid flex items-center justify-center p-8">
