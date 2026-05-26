@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Gauge, ShieldCheck } from "lucide-react";
 import type { Summary } from "@/types/report";
 
 interface ScoreBreakdownPanelProps {
@@ -13,6 +13,7 @@ export function ScoreBreakdownPanel({ summary }: ScoreBreakdownPanelProps) {
     ? (breakdown.fixedScore / breakdown.maxFixedScore) * 100
     : summary.score;
   const llmPercent = breakdown ? (breakdown.llmScore / breakdown.maxLlmScore) * 100 : 0;
+  const displayedRiskFlags = breakdown ? sortRiskFlags(breakdown.riskFlags).slice(0, 6) : [];
 
   return (
     <section className="border-b border-zinc-800 p-4">
@@ -71,13 +72,55 @@ export function ScoreBreakdownPanel({ summary }: ScoreBreakdownPanelProps) {
                 <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-500">
                   {component.rationale}
                 </p>
+                {component.assumptionsUsed && component.assumptionsUsed.length > 0 && (
+                  <p className="mt-1 line-clamp-1 font-mono text-[10px] text-zinc-600">
+                    {component.assumptionsUsed.length} assumptions
+                  </p>
+                )}
               </div>
             ))}
           </div>
+
+          {breakdown.riskFlags.length > 0 && (
+            <div className="space-y-2 border-t border-zinc-800 pt-3">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                <AlertTriangle size={12} />
+                Risk flags
+              </div>
+              {displayedRiskFlags.map((flag) => (
+                <div
+                  key={`${flag.domain}-${flag.message}`}
+                  className={`border px-2 py-1.5 text-[11px] leading-4 ${riskTone(flag.severity)}`}
+                >
+                  <div className="font-mono text-[10px] uppercase">
+                    {flag.severity} / {flag.domain}
+                  </div>
+                  <p className="mt-0.5 text-zinc-300">{flag.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>
   );
+}
+
+function sortRiskFlags<T extends { severity: string }>(riskFlags: T[]) {
+  const priority: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+  return [...riskFlags].sort(
+    (left, right) => (priority[left.severity] ?? 3) - (priority[right.severity] ?? 3),
+  );
+}
+
+function riskTone(severity: string) {
+  if (severity === "critical") {
+    return "border-red-500/40 bg-red-500/5 text-red-300";
+  }
+  if (severity === "warning") {
+    return "border-amber-500/40 bg-amber-500/5 text-amber-300";
+  }
+  return "border-zinc-800 bg-zinc-950 text-zinc-500";
 }
 
 interface ScoreBarProps {

@@ -8,16 +8,13 @@ import { TerminalGrid } from "@/components/workspace/TerminalGrid";
 import { WhatIfPanel } from "@/components/simulator/WhatIfPanel";
 import { SliderControls } from "@/components/simulator/SliderControls";
 import { useWhatIf } from "@/hooks/useWhatIf";
+import type { AnalysisIntake } from "@/services/intakeTransfer";
 import type { AgentLogEvent } from "@/types/streaming";
 import { ScoreBreakdownPanel } from "./ScoreBreakdownPanel";
 import { LocationRecommendations } from "./LocationRecommendations";
 
 interface WorkspaceLayoutProps {
-  intake: {
-    businessType: string;
-    expectedRent: number;
-    squareMeters: number;
-  };
+  intake: AnalysisIntake;
   report: LeaseLensReport | null;
   agentLogs: Record<string, AgentLogEvent[]>;
   status: string;
@@ -32,6 +29,17 @@ export function WorkspaceLayout({
   error,
 }: WorkspaceLayoutProps) {
   const [showMap, setShowMap] = useState(false);
+  const occupancyCost =
+    report?.financialModel.totalMonthlyOccupancyCost ??
+    intake.expectedRent + intake.serviceChargeMonthly;
+  const nonOccupancyCost =
+    report?.financialModel.monthlyOperatingCost && report.financialModel.totalMonthlyOccupancyCost
+      ? Math.max(
+          report.financialModel.monthlyOperatingCost -
+            report.financialModel.totalMonthlyOccupancyCost,
+          0
+        )
+      : report?.financialModel.fixedCostNonRent ?? 2000;
 
   const whatIf = useWhatIf(
     {
@@ -39,14 +47,16 @@ export function WorkspaceLayout({
       averageSpend: report?.financialModel.averageSpend ?? 35,
       conversionRate: report?.financialModel.conversionRate ?? 0.08,
       grossMargin: report?.financialModel.grossMargin ?? 0.65,
-      baseRent: report?.financialModel.baseRent ?? intake.expectedRent,
-      fixedCostNonRent: report?.financialModel.fixedCostNonRent ?? 2000,
-      initialDecorationCost: report?.financialModel.initialDecorationCost,
+      baseRent: occupancyCost,
+      fixedCostNonRent: nonOccupancyCost,
+      initialDecorationCost:
+        report?.financialModel.setupCapitalRequired ??
+        report?.financialModel.initialDecorationCost,
     },
     {
       expectedTraffic: report?.financialModel.expectedTraffic,
       averageSpend: report?.financialModel.averageSpend,
-      baseRent: report?.financialModel.baseRent ?? intake.expectedRent,
+      baseRent: occupancyCost,
     }
   );
 
@@ -112,7 +122,10 @@ export function WorkspaceLayout({
                 result={whatIf.result}
                 paybackMonths={whatIf.paybackMonths}
                 rentPressure={whatIf.rentPressure}
-                initialCost={report.financialModel.initialDecorationCost}
+                initialCost={
+                  report.financialModel.setupCapitalRequired ||
+                  report.financialModel.initialDecorationCost
+                }
               />
               <LocationRecommendations locations={report.recommendedLocations} />
             </>
@@ -135,7 +148,7 @@ export function WorkspaceLayout({
           onRentChange={(v) => whatIf.setSlider("baseRent", v)}
           maxTraffic={500}
           maxSpend={100}
-          maxRent={20000}
+          maxRent={30000}
         />}
       </div>
     </div>

@@ -4,16 +4,97 @@ from src.models.schemas.intake import SpaceIntakeRequest
 
 SQM_PER_SQFT = 0.092903
 
+FNB_TERMS = ("cafe", "coffee", "bakery", "restaurant", "bar", "food", "bistro")
 
 INDUSTRY_PROFILES = {
-    "cafe": {"ideal_min": 35, "ideal_max": 120, "rent_psf": 16},
-    "coffee": {"ideal_min": 35, "ideal_max": 120, "rent_psf": 16},
-    "coffee shop": {"ideal_min": 35, "ideal_max": 120, "rent_psf": 16},
-    "bakery": {"ideal_min": 45, "ideal_max": 140, "rent_psf": 14},
-    "restaurant": {"ideal_min": 70, "ideal_max": 220, "rent_psf": 18},
-    "bar": {"ideal_min": 60, "ideal_max": 180, "rent_psf": 17},
-    "bookstore": {"ideal_min": 80, "ideal_max": 260, "rent_psf": 12},
-    "boutique": {"ideal_min": 45, "ideal_max": 160, "rent_psf": 19},
+    "cafe": {
+        "ideal_min": 35,
+        "ideal_max": 120,
+        "rent_psf": 16,
+        "traffic": 135,
+        "spend": 18,
+        "margin": 0.68,
+        "staffing": 10_000,
+        "utilities": 850,
+        "fitout": 60_000,
+    },
+    "coffee": {
+        "ideal_min": 35,
+        "ideal_max": 120,
+        "rent_psf": 16,
+        "traffic": 135,
+        "spend": 18,
+        "margin": 0.68,
+        "staffing": 9_000,
+        "utilities": 750,
+        "fitout": 55_000,
+    },
+    "coffee shop": {
+        "ideal_min": 35,
+        "ideal_max": 120,
+        "rent_psf": 16,
+        "traffic": 135,
+        "spend": 18,
+        "margin": 0.68,
+        "staffing": 9_000,
+        "utilities": 750,
+        "fitout": 55_000,
+    },
+    "bakery": {
+        "ideal_min": 45,
+        "ideal_max": 140,
+        "rent_psf": 14,
+        "traffic": 110,
+        "spend": 16,
+        "margin": 0.62,
+        "staffing": 11_000,
+        "utilities": 1_100,
+        "fitout": 75_000,
+    },
+    "restaurant": {
+        "ideal_min": 70,
+        "ideal_max": 220,
+        "rent_psf": 18,
+        "traffic": 100,
+        "spend": 32,
+        "margin": 0.58,
+        "staffing": 18_000,
+        "utilities": 1_800,
+        "fitout": 130_000,
+    },
+    "bar": {
+        "ideal_min": 60,
+        "ideal_max": 180,
+        "rent_psf": 17,
+        "traffic": 80,
+        "spend": 38,
+        "margin": 0.7,
+        "staffing": 16_000,
+        "utilities": 1_400,
+        "fitout": 110_000,
+    },
+    "bookstore": {
+        "ideal_min": 80,
+        "ideal_max": 260,
+        "rent_psf": 12,
+        "traffic": 80,
+        "spend": 24,
+        "margin": 0.45,
+        "staffing": 6_000,
+        "utilities": 500,
+        "fitout": 45_000,
+    },
+    "boutique": {
+        "ideal_min": 45,
+        "ideal_max": 160,
+        "rent_psf": 19,
+        "traffic": 75,
+        "spend": 65,
+        "margin": 0.55,
+        "staffing": 7_000,
+        "utilities": 450,
+        "fitout": 65_000,
+    },
 }
 
 
@@ -24,36 +105,34 @@ def enrich_summary(
     llm_summary: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the final 60/40 score contract from deterministic and LLM inputs."""
-    metrics = _financial_metrics(financial_model)
+    metrics = _financial_metrics(intake, financial_model)
+    flags: list[dict[str, Any]] = []
     components = [
-        _financial_component(intake, financial_model, metrics),
-        _demand_component(intake, map_data),
-        _competition_component(map_data),
-        _operational_component(intake),
+        _finance_component(intake, metrics, flags),
+        _building_component(intake, flags),
+        _regulatory_component(intake, flags),
+        _location_component(intake, map_data, flags),
     ]
-    fixed_score = round(sum(component["score"] for component in components))
-    fixed_score = int(_clamp(fixed_score, 0, 60))
+    fixed_score = int(_clamp(round(sum(component["score"] for component in components)), 0, 60))
 
     llm_raw_score = _number(llm_summary.get("score"), 70)
-    llm_score = int(round(_clamp(llm_raw_score, 0, 100) * 0.4))
-    llm_score = int(_clamp(llm_score, 0, 40))
+    llm_score = int(_clamp(round(_clamp(llm_raw_score, 0, 100) * 0.4), 0, 40))
 
     total_score = int(_clamp(fixed_score + llm_score, 0, 100))
+    blocking = any(flag["blocking"] for flag in flags if flag["severity"] == "critical")
     return {
         "score": total_score,
-        "verdict": _verdict(total_score),
-        "paybackMonths": _payback_months(
-            _number(financial_model.get("initialDecorationCost"), 45_000),
-            metrics["netProfit"],
-        ),
+        "verdict": _verdict(total_score, blocking),
+        "paybackMonths": metrics["paybackMonths"],
         "scoreBreakdown": {
             "fixedScore": fixed_score,
             "maxFixedScore": 60,
             "llmScore": llm_score,
             "maxLlmScore": 40,
             "totalScore": total_score,
-            "confidence": _confidence(map_data),
+            "confidence": _confidence(map_data, flags),
             "components": components,
+            "riskFlags": flags,
         },
     }
 
@@ -68,11 +147,21 @@ def recommend_locations(
     candidate_pool = _candidate_pool(normalized)
     base_score = _number(summary.get("score"), 70)
     competitors = len(map_data.get("competitors", []))
+    risk_flags = summary.get("scoreBreakdown", {}).get("riskFlags", [])
+    critical_penalty = 8 * sum(1 for flag in risk_flags if flag.get("severity") == "critical")
 
     recommendations = []
-    for index, candidate in enumerate(candidate_pool[:3]):
+    for candidate in candidate_pool[:3]:
         monthly_rent = _estimated_monthly_rent(candidate["rent_psf"], intake.square_meters)
-        score = int(_clamp(base_score + candidate["score_delta"] - competitors, 45, 95))
+        rent_penalty = 5 if monthly_rent > max(intake.expected_rent * 1.8, 1) else 0
+        adjusted_score = (
+            base_score
+            + candidate["score_delta"]
+            - competitors
+            - critical_penalty
+            - rent_penalty
+        )
+        score = int(_clamp(adjusted_score, 35, 95))
         recommendations.append(
             {
                 "name": candidate["name"],
@@ -95,111 +184,415 @@ def recommend_locations(
     return recommendations
 
 
-def _financial_metrics(financial_model: dict[str, Any]) -> dict[str, float]:
-    traffic = _number(financial_model.get("expectedTraffic"), 120)
+def _financial_metrics(
+    intake: SpaceIntakeRequest,
+    financial_model: dict[str, Any],
+) -> dict[str, float]:
+    profile = _industry_profile(intake.business_type)
+    traffic = intake.expected_daily_customers or int(
+        _number(financial_model.get("expectedTraffic"), profile["traffic"])
+    )
     conversion = _number(financial_model.get("conversionRate"), 0.08)
-    spend = _number(financial_model.get("averageSpend"), 35)
-    margin = _number(financial_model.get("grossMargin"), 0.65)
-    rent = _number(financial_model.get("baseRent"), 5_200)
-    fixed_cost = _number(financial_model.get("fixedCostNonRent"), 2_000)
+    spend = intake.average_spend or _number(financial_model.get("averageSpend"), profile["spend"])
+    margin = intake.gross_margin or _number(financial_model.get("grossMargin"), profile["margin"])
+    rent = intake.expected_rent
+    lease_term = float(intake.lease_term_months or 36)
+    rent_free = min(float(intake.rent_free_months), max(lease_term - 1, 0))
+    effective_rent = rent * (lease_term - rent_free) / lease_term if lease_term > 0 else rent
+    using_detailed_costs = (
+        intake.utilities_monthly_estimate is not None or intake.staffing_monthly is not None
+    )
+    if using_detailed_costs:
+        utilities = intake.utilities_monthly_estimate
+        if utilities is None:
+            utilities = float(profile["utilities"])
+        staffing = intake.staffing_monthly
+        if staffing is None:
+            staffing = float(profile["staffing"])
+        base_non_rent_operating = utilities + staffing
+    else:
+        utilities = 0.0
+        staffing = 0.0
+        base_non_rent_operating = _number(
+            financial_model.get("fixedCostNonRent"),
+            profile["utilities"] + profile["staffing"],
+        )
+    fitout = intake.fitout_budget
+    if fitout is None:
+        fitout = _number(financial_model.get("initialDecorationCost"), profile["fitout"])
 
+    total_occupancy = (
+        effective_rent + intake.service_charge_monthly + intake.other_monthly_costs
+    )
+    monthly_operating_cost = (
+        total_occupancy
+        + base_non_rent_operating
+        + intake.marketing_monthly
+        + intake.insurance_monthly
+    )
     gross_revenue = traffic * 30 * conversion * spend
     gross_profit = gross_revenue * margin
-    net_profit = gross_profit - rent - fixed_cost
-    rent_pressure = rent / gross_revenue if gross_revenue > 0 else 1
+    net_profit = gross_profit - monthly_operating_cost
+    rent_pressure = total_occupancy / gross_revenue if gross_revenue > 0 else 1
+    break_even_revenue = monthly_operating_cost / margin if margin > 0 else 999_999
+    setup_capital = (
+        fitout
+        + rent * intake.deposit_months
+        + intake.license_fees
+        + intake.reinstatement_cost
+    )
+    payback_months = _payback_months(setup_capital, net_profit)
+    lease_runway = lease_term - payback_months if payback_months < 999 else -lease_term
+
+    financial_model.update(
+        {
+            "baseRent": rent,
+            "expectedTraffic": int(traffic),
+            "averageSpend": spend,
+            "grossMargin": margin,
+            "fixedCostNonRent": round(monthly_operating_cost - total_occupancy, 2),
+            "initialDecorationCost": fitout,
+            "effectiveMonthlyRent": round(effective_rent, 2),
+            "totalMonthlyOccupancyCost": round(total_occupancy, 2),
+            "monthlyOperatingCost": round(monthly_operating_cost, 2),
+            "breakEvenRevenue": round(break_even_revenue, 2),
+            "setupCapitalRequired": round(setup_capital, 2),
+            "leaseRunwayMonths": round(lease_runway, 1),
+            "paybackMonths": payback_months,
+        }
+    )
     return {
         "grossRevenue": gross_revenue,
         "grossProfit": gross_profit,
         "netProfit": net_profit,
         "rentPressure": rent_pressure,
+        "breakEvenRevenue": break_even_revenue,
+        "paybackMonths": payback_months,
+        "leaseTermMonths": lease_term,
+        "leaseRunwayMonths": lease_runway,
     }
 
 
-def _financial_component(
+def _finance_component(
     intake: SpaceIntakeRequest,
-    financial_model: dict[str, Any],
     metrics: dict[str, float],
+    flags: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    pressure_score = _clamp((0.55 - metrics["rentPressure"]) / 0.37 * 15, 0, 15)
-    rent = _number(financial_model.get("baseRent"), intake.expected_rent)
-    profit_score = _clamp(metrics["netProfit"] / max(rent * 1.5, 1) * 10, 0, 10)
-    score = round(pressure_score + profit_score, 1)
+    rent_pressure = metrics["rentPressure"]
+    gross_revenue = metrics["grossRevenue"]
+    net_profit = metrics["netProfit"]
+    profit_margin = net_profit / gross_revenue if gross_revenue > 0 else -1
+    lease_term = metrics["leaseTermMonths"]
+    payback = metrics["paybackMonths"]
+    break_even_ratio = (
+        metrics["breakEvenRevenue"] / gross_revenue if gross_revenue > 0 else 9
+    )
+    using_detailed_costs = (
+        intake.utilities_monthly_estimate is not None or intake.staffing_monthly is not None
+    )
+
+    score = 0.0
+    score += _clamp((0.42 - rent_pressure) / 0.27 * 8, 0, 8)
+    score += _clamp((profit_margin + 0.05) / 0.25 * 6, 0, 6)
+    score += _clamp((1.15 - break_even_ratio) / 0.55 * 5, 0, 5)
+    payback_ratio = payback / lease_term if lease_term > 0 else 9
+    score += _clamp((0.9 - payback_ratio) / 0.55 * 5, 0, 5)
+
+    assumptions = []
+    if intake.lease_term_months is None:
+        assumptions.append("Lease term defaulted to 36 months.")
+    if intake.fitout_budget is None:
+        assumptions.append("Fit-out budget defaulted from industry benchmark or LLM output.")
+    if intake.utilities_monthly_estimate is None and using_detailed_costs:
+        assumptions.append("Utilities estimate defaulted from industry benchmark.")
+    if intake.staffing_monthly is None and using_detailed_costs:
+        assumptions.append("Staffing estimate defaulted from industry benchmark.")
+
+    if rent_pressure > 0.3:
+        _add_flag(
+            flags,
+            "finance",
+            "warning",
+            "Occupancy cost exceeds 30% of projected gross revenue.",
+            "fixed_finance_agent",
+        )
+    if net_profit <= 0:
+        _add_flag(
+            flags,
+            "finance",
+            "critical",
+            "Projected monthly net profit is negative under current assumptions.",
+            "fixed_finance_agent",
+        )
+    if payback > lease_term * 0.7:
+        _add_flag(
+            flags,
+            "finance",
+            "warning",
+            "Estimated payback is too close to or longer than the lease term.",
+            "fixed_finance_agent",
+        )
+
     return {
-        "key": "financial_viability",
-        "label": "Financial viability",
-        "score": score,
-        "maxScore": 25,
-        "rationale": "Uses rent pressure, estimated gross profit, and payback capacity.",
+        "key": "finance_and_lease_economics",
+        "label": "Finance and lease economics",
+        "score": round(score, 1),
+        "maxScore": 24,
+        "rationale": "Uses effective rent, all-in occupancy cost, break-even revenue, and payback.",
         "evidence": [
             {
-                "label": "Monthly rent",
-                "value": f"S${rent:,.0f}",
+                "label": "Rent pressure",
+                "value": f"{rent_pressure * 100:.1f}%",
+                "source": "fixed_finance_agent",
+            },
+            {
+                "label": "Net profit",
+                "value": f"S${net_profit:,.0f}/mo",
+                "source": "fixed_finance_agent",
+            },
+            {
+                "label": "Payback",
+                "value": f"{payback:g} months",
+                "source": "fixed_finance_agent",
+            },
+        ],
+        "assumptionsUsed": assumptions,
+    }
+
+
+def _building_component(
+    intake: SpaceIntakeRequest,
+    flags: list[dict[str, Any]],
+) -> dict[str, Any]:
+    is_fnb = _is_fnb(intake.business_type)
+    full_cooking = intake.cooking_intensity == "full"
+    light_or_full = intake.cooking_intensity in {"light", "full"}
+    checks = [
+        ("Water supply", intake.has_water_supply, 2.0, "SFA food shop licensing readiness"),
+        ("Electrical readiness", intake.electrical_readiness, 2.0, "EMA licensed worker check"),
+        ("Floor trap", intake.has_floor_trap, 2.0, "PUB used-water readiness"),
+        ("Wastewater readiness", intake.wastewater_readiness, 2.0, "PUB sanitary readiness"),
+        ("Grease trap", intake.has_grease_trap, 3.0 if light_or_full else 1.0, "PUB grease trap"),
+        (
+            "Kitchen exhaust",
+            intake.has_exhaust,
+            3.0 if full_cooking else 1.0,
+            "SCDF kitchen exhaust",
+        ),
+        ("Gas readiness", intake.has_gas, 1.0 if full_cooking else 0.5, "EMA gas worker check"),
+        ("Layout shape", _layout_status(intake.layout_shape), 1.0, "architectural fit"),
+    ]
+    score = 0.0
+    assumptions = []
+    for label, status, weight, source in checks:
+        score += _readiness_points(status, weight)
+        if status == "unknown":
+            assumptions.append(f"{label} is unknown.")
+            _add_flag(
+                flags,
+                "building",
+                "info",
+                f"{label} should be verified before signing.",
+                source,
+            )
+        if status == "no" and is_fnb and label in {"Water supply", "Electrical readiness"}:
+            _add_flag(
+                flags,
+                "building",
+                "critical",
+                f"{label} is missing for an F&B concept.",
+                source,
+                blocking=True,
+            )
+
+    if full_cooking and intake.has_exhaust == "no":
+        _add_flag(
+            flags,
+            "building",
+            "critical",
+            "Full cooking requires a viable kitchen exhaust route before lease commitment.",
+            "SCDF Fire Code kitchen exhaust screening",
+            blocking=True,
+        )
+    if full_cooking and intake.has_floor_trap == "no" and intake.has_grease_trap == "no":
+        _add_flag(
+            flags,
+            "building",
+            "critical",
+            "Full cooking lacks both floor trap and grease trap readiness.",
+            "PUB grease trap and sanitary screening",
+            blocking=True,
+        )
+    if full_cooking and intake.exhaust_route_available == "no":
+        _add_flag(
+            flags,
+            "building",
+            "warning",
+            "No clear exhaust route was declared; landlord and QP review are needed.",
+            "SCDF kitchen exhaust screening",
+        )
+    if intake.floor_position == "basement" and full_cooking:
+        _add_flag(
+            flags,
+            "building",
+            "warning",
+            "Basement F&B can add exhaust and loading constraints.",
+            "architectural fit",
+        )
+
+    return {
+        "key": "building_services_readiness",
+        "label": "Building services readiness",
+        "score": round(_clamp(score, 0, 16), 1),
+        "maxScore": 16,
+        "rationale": "Checks water, power, gas, wastewater, grease trap, and exhaust readiness.",
+        "evidence": [
+            {
+                "label": "Cooking intensity",
+                "value": intake.cooking_intensity,
+                "source": "user_input",
+            },
+            {"label": "Exhaust", "value": intake.has_exhaust, "source": "user_input"},
+            {"label": "Grease trap", "value": intake.has_grease_trap, "source": "user_input"},
+            {"label": "Floor trap", "value": intake.has_floor_trap, "source": "user_input"},
+        ],
+        "assumptionsUsed": assumptions,
+    }
+
+
+def _regulatory_component(
+    intake: SpaceIntakeRequest,
+    flags: list[dict[str, Any]],
+) -> dict[str, Any]:
+    score = 0.0
+    assumptions = []
+    if intake.approved_use_status == "confirmed":
+        score += 3.0
+    elif intake.approved_use_status == "unknown":
+        score += 1.5
+        assumptions.append("Approved use is unknown.")
+        _add_flag(
+            flags,
+            "regulatory",
+            "info",
+            "Confirm approved use and landlord consent before signing.",
+            "URA/HDB change-use screening",
+        )
+    else:
+        _add_flag(
+            flags,
+            "regulatory",
+            "warning",
+            "Declared use may require change-of-use or landlord approval.",
+            "URA/HDB change-use screening",
+        )
+
+    is_fnb = _is_fnb(intake.business_type)
+    if is_fnb and intake.cooking_intensity != "none":
+        if intake.has_grease_trap == "yes":
+            score += 1.5
+        elif intake.has_grease_trap == "unknown":
+            score += 0.7
+        if intake.has_exhaust == "yes":
+            score += 1.5
+        elif intake.has_exhaust == "unknown":
+            score += 0.7
+        _add_flag(
+            flags,
+            "regulatory",
+            "info",
+            "Food shop licensing, PUB grease trap, and SCDF exhaust checks remain screening items.",
+            "SFA/PUB/SCDF screening",
+        )
+    else:
+        score += 2.0
+
+    if intake.fitout_budget and intake.fitout_budget > 50_000:
+        _add_flag(
+            flags,
+            "regulatory",
+            "info",
+            "High fit-out budget may involve A&A, fire safety, or reinstatement review.",
+            "BCA/HDB A&A screening",
+        )
+    score += 1.5 if intake.electrical_readiness == "yes" else 0.8
+    score += 1.0 if intake.has_gas in {"yes", "unknown"} else 0.3
+
+    return {
+        "key": "regulatory_and_approval_risk",
+        "label": "Regulatory and approval risk",
+        "score": round(_clamp(score, 0, 8), 1),
+        "maxScore": 8,
+        "rationale": "Screens approved use, food licensing, PUB, SCDF, EMA, and A&A risks.",
+        "evidence": [
+            {
+                "label": "Approved use",
+                "value": intake.approved_use_status,
                 "source": "user_input",
             },
             {
-                "label": "Rent pressure",
-                "value": f"{metrics['rentPressure'] * 100:.1f}%",
-                "source": "fixed_agent",
-            },
-            {
-                "label": "Estimated net profit",
-                "value": f"S${metrics['netProfit']:,.0f}/mo",
-                "source": "fixed_agent",
+                "label": "Screening only",
+                "value": "Verify with landlord, QP, PE, LEW, SFA, PUB, SCDF, BCA/HDB/URA.",
+                "source": "professional_caution",
             },
         ],
+        "assumptionsUsed": assumptions,
     }
 
 
-def _demand_component(intake: SpaceIntakeRequest, map_data: dict[str, Any]) -> dict[str, Any]:
+def _location_component(
+    intake: SpaceIntakeRequest,
+    map_data: dict[str, Any],
+    flags: list[dict[str, Any]],
+) -> dict[str, Any]:
     in_singapore = 1.15 <= intake.latitude <= 1.48 and 103.55 <= intake.longitude <= 104.1
     available = map_data.get("status") == "available"
-    competitor_count = len(map_data.get("competitors", []))
-    score = 0
-    score += 5 if in_singapore else 2
-    score += 4 if intake.site_label else 2
-    score += 3 if available else 1
-    score += 3 if competitor_count > 0 else 1
+    competitors = map_data.get("competitors", [])
+    high_threats = sum(1 for item in competitors if item.get("threatLevel") == "HIGH")
+    count = len(competitors)
+    score = 0.0
+    score += 4 if in_singapore else 1
+    score += 2 if intake.site_label else 1
+    score += 2 if available else 0.5
+    if count == 0:
+        score += 2
+    elif count <= 3:
+        score += 4
+    elif count <= 7:
+        score += 3
+    else:
+        score += 1.5
+    score -= min(high_threats, 3) * 0.7
+
+    if not in_singapore:
+        _add_flag(
+            flags,
+            "market",
+            "warning",
+            "Selected coordinates are outside the Singapore screening range.",
+            "fixed_market_agent",
+        )
+    if not available:
+        _add_flag(
+            flags,
+            "market",
+            "info",
+            "Live nearby-place data is unavailable; market score uses fallback assumptions.",
+            "google_places",
+        )
+
     return {
-        "key": "location_demand",
-        "label": "Singapore demand signals",
-        "score": score,
-        "maxScore": 15,
-        "rationale": "Rewards verified Singapore coordinates and live market data coverage.",
+        "key": "location_and_competition_fit",
+        "label": "Location and competition fit",
+        "score": round(_clamp(score, 0, 12), 1),
+        "maxScore": 12,
+        "rationale": "Keeps location demand and nearby competition as a market validation signal.",
         "evidence": [
             {
                 "label": "Selected site",
                 "value": intake.site_label or "Current GPS coordinate",
                 "source": "onemap_or_google_places",
             },
-            {
-                "label": "Live data",
-                "value": "available" if available else "fallback",
-                "source": "google_places",
-            },
-        ],
-    }
-
-
-def _competition_component(map_data: dict[str, Any]) -> dict[str, Any]:
-    competitors = map_data.get("competitors", [])
-    count = len(competitors)
-    high_threats = sum(1 for item in competitors if item.get("threatLevel") == "HIGH")
-    if count == 0:
-        score = 8
-    elif count <= 3:
-        score = 11
-    elif count <= 7:
-        score = 9
-    else:
-        score = 6
-    score = max(score - min(high_threats, 3), 0)
-    return {
-        "key": "competition_mix",
-        "label": "Competition and complement mix",
-        "score": score,
-        "maxScore": 12,
-        "rationale": "Penalizes heavy same-category saturation close to the target site.",
-        "evidence": [
             {
                 "label": "Nearby same-category places",
                 "value": str(count),
@@ -211,41 +604,7 @@ def _competition_component(map_data: dict[str, Any]) -> dict[str, Any]:
                 "source": "google_places",
             },
         ],
-    }
-
-
-def _operational_component(intake: SpaceIntakeRequest) -> dict[str, Any]:
-    profile = _industry_profile(intake.business_type)
-    ideal_min = profile["ideal_min"]
-    ideal_max = profile["ideal_max"]
-    if ideal_min <= intake.square_meters <= ideal_max:
-        score = 8
-        fit = "within target range"
-    elif intake.square_meters < ideal_min:
-        score = max(3, round(8 * intake.square_meters / ideal_min, 1))
-        fit = "smaller than target range"
-    else:
-        overage = min((intake.square_meters - ideal_max) / ideal_max, 1)
-        score = round(8 * (1 - overage * 0.6), 1)
-        fit = "larger than target range"
-    return {
-        "key": "operational_fit",
-        "label": "Operational fit",
-        "score": score,
-        "maxScore": 8,
-        "rationale": "Compares unit size with a conservative industry footprint preset.",
-        "evidence": [
-            {
-                "label": "Input area",
-                "value": f"{intake.square_meters:g} sqm",
-                "source": "user_input",
-            },
-            {
-                "label": "Industry fit",
-                "value": fit,
-                "source": "fixed_agent",
-            },
-        ],
+        "assumptionsUsed": [],
     }
 
 
@@ -342,8 +701,7 @@ def _candidate_pool(normalized_business_type: str) -> list[dict[str, Any]]:
         food[0],
         retail[2],
     ]
-    food_terms = ("cafe", "coffee", "bakery", "restaurant", "bar")
-    if any(term in normalized_business_type for term in food_terms):
+    if _is_fnb(normalized_business_type):
         return food
     if any(term in normalized_business_type for term in ("retail", "boutique", "book", "shop")):
         return retail
@@ -377,8 +735,39 @@ def _industry_profile(business_type: str) -> dict[str, float]:
     normalized = business_type.strip().lower()
     return INDUSTRY_PROFILES.get(
         normalized,
-        {"ideal_min": 40, "ideal_max": 180, "rent_psf": 15},
+        {
+            "ideal_min": 40,
+            "ideal_max": 180,
+            "rent_psf": 15,
+            "traffic": 100,
+            "spend": 30,
+            "margin": 0.6,
+            "staffing": 8_000,
+            "utilities": 650,
+            "fitout": 55_000,
+        },
     )
+
+
+def _is_fnb(business_type: str) -> bool:
+    normalized = business_type.strip().lower()
+    return any(term in normalized for term in FNB_TERMS)
+
+
+def _layout_status(layout_shape: str) -> str:
+    if layout_shape in {"regular", "corner"}:
+        return "yes"
+    if layout_shape == "unknown":
+        return "unknown"
+    return "no"
+
+
+def _readiness_points(status: str, weight: float) -> float:
+    if status == "yes":
+        return weight
+    if status == "unknown":
+        return weight * 0.55
+    return 0.0
 
 
 def _estimated_monthly_rent(rent_psf: float, square_meters: float) -> float:
@@ -392,20 +781,44 @@ def _payback_months(initial_cost: float, monthly_net_profit: float) -> float:
     return round(initial_cost / monthly_net_profit, 1)
 
 
-def _confidence(map_data: dict[str, Any]) -> str:
-    if map_data.get("status") == "available" and map_data.get("competitors"):
-        return "HIGH"
-    if map_data.get("status") == "available":
+def _confidence(map_data: dict[str, Any], flags: list[dict[str, Any]]) -> str:
+    if any(flag["severity"] == "critical" for flag in flags):
+        return "LOW"
+    unknown_flags = sum(1 for flag in flags if flag["severity"] == "info")
+    if map_data.get("status") != "available":
+        return "LOW"
+    if unknown_flags > 0:
         return "MEDIUM"
-    return "LOW"
+    return "HIGH"
 
 
-def _verdict(score: int) -> str:
+def _verdict(score: int, blocking: bool = False) -> str:
+    if blocking:
+        return "HIGH RISK - VERIFY BEFORE SIGNING"
     if score >= 80:
         return "APPROVED"
     if score >= 60:
         return "APPROVED WITH CONDITIONS"
     return "REJECTED"
+
+
+def _add_flag(
+    flags: list[dict[str, Any]],
+    domain: str,
+    severity: str,
+    message: str,
+    source: str | None = None,
+    blocking: bool = False,
+) -> None:
+    candidate = {
+        "domain": domain,
+        "severity": severity,
+        "message": message,
+        "source": source,
+        "blocking": blocking,
+    }
+    if candidate not in flags:
+        flags.append(candidate)
 
 
 def _number(value: Any, fallback: float) -> float:

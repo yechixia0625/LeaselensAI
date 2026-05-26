@@ -4,8 +4,8 @@
  */
 export function calculateRentPressure(
   baseRent: number,
-  netRevenue: number
+  grossRevenue: number
 ): number {
-  if (netRevenue <= 0) return 100;
-  return Math.min(100, (baseRent / netRevenue) * 100);
+  if (grossRevenue <= 0) return 100;
+  return Math.min(100, (baseRent / grossRevenue) * 100);
 }

@@ -57,7 +57,7 @@ export function SliderControls({
       <div className="flex-1 space-y-1">
         <div className="flex items-center justify-between">
           <span className="text-xs font-mono text-zinc-500 uppercase">
-            Negotiated Rent
+            Occupancy Cost
           </span>
           <span className="text-xs font-mono text-white tabular-nums">
             ${baseRent.toLocaleString()}

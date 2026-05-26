@@ -32,6 +32,20 @@ Evaluate this commercial lease opportunity:
 - Business type: {intake.business_type}
 - Monthly rent: {intake.expected_rent}
 - Space size: {intake.square_meters} sqm
+- Lease term: {intake.lease_term_months or "unknown"} months
+- Service charge: {intake.service_charge_monthly}
+- Fit-out budget: {intake.fitout_budget or "unknown"}
+- Cooking intensity: {intake.cooking_intensity}
+- Floor position: {intake.floor_position}
+- Layout shape: {intake.layout_shape}
+- Water supply: {intake.has_water_supply}
+- Electrical readiness: {intake.electrical_readiness}
+- Gas readiness: {intake.has_gas}
+- Floor trap: {intake.has_floor_trap}
+- Grease trap: {intake.has_grease_trap}
+- Exhaust readiness: {intake.has_exhaust}
+- Wastewater readiness: {intake.wastewater_readiness}
+- Approved use status: {intake.approved_use_status}
 
 Generate a strategic summary with verdict. Return ONLY valid JSON matching this structure:
 {{
@@ -47,7 +61,11 @@ Scoring criteria:
 - 60-79: Viable with conditions, negotiate terms
 - Below 60: High risk, recommend rejection
 
-Consider location economics, market saturation, and ROI potential."""
+Consider location economics, market saturation, and ROI potential.
+Consider Singapore F&B due diligence: SFA food shop licensing, PUB grease trap,
+SCDF kitchen exhaust/fire safety, EMA licensed electrical/gas workers, and
+BCA/HDB/URA A&A or change-of-use checks. This is a screening recommendation,
+not a substitute for professional approval."""
 
     def parse_response(self, raw_llm_output: str) -> dict:
         try:

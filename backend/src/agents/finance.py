@@ -32,6 +32,16 @@ Analyze the financial viability of this commercial lease:
 - Business type: {intake.business_type}
 - Monthly rent: {intake.expected_rent}
 - Space size: {intake.square_meters} sqm
+- Lease term: {intake.lease_term_months or "unknown"} months
+- Rent-free period: {intake.rent_free_months} months
+- Service charge: {intake.service_charge_monthly} per month
+- Other monthly costs: {intake.other_monthly_costs}
+- Utilities estimate: {intake.utilities_monthly_estimate or "unknown"}
+- Staffing estimate: {intake.staffing_monthly or "unknown"}
+- Fit-out budget: {intake.fitout_budget or "unknown"}
+- Expected daily customers: {intake.expected_daily_customers or "unknown"}
+- Average spend: {intake.average_spend or "unknown"}
+- Gross margin: {intake.gross_margin or "unknown"}
 
 Generate a financial model. Return ONLY valid JSON matching this structure:
 {{
@@ -47,6 +57,7 @@ Generate a financial model. Return ONLY valid JSON matching this structure:
 }}
 
 Consider industry benchmarks for {intake.business_type} businesses.
+When the user supplied a financial assumption above, preserve it instead of overwriting it.
 Be realistic with traffic and conversion estimates."""
 
     def parse_response(self, raw_llm_output: str) -> dict:

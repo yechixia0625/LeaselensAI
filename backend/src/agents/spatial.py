@@ -31,6 +31,17 @@ class SpatialAgent(BaseAgent):
 Analyze this commercial space for a {intake.business_type} use case.
 Space size: {intake.square_meters} sqm
 Target rent: {intake.expected_rent} per month
+Floor position: {intake.floor_position}
+Layout shape: {intake.layout_shape}
+Cooking intensity: {intake.cooking_intensity}
+Water supply: {intake.has_water_supply}
+Floor trap: {intake.has_floor_trap}
+Grease trap: {intake.has_grease_trap}
+Electrical readiness: {intake.electrical_readiness}
+Gas readiness: {intake.has_gas}
+Exhaust readiness: {intake.has_exhaust}
+Wastewater readiness: {intake.wastewater_readiness}
+Exhaust route available: {intake.exhaust_route_available}
 
 Generate a 2D spatial blueprint analysis. Return ONLY valid JSON matching this structure:
 {{
@@ -65,7 +76,9 @@ Consider:
 - Window displays for street-facing sides
 - High-profit zones near entrance and windows
 - Dead zones in corners and back areas
-- Optimal layout for {intake.business_type} operations"""
+- Optimal layout for {intake.business_type} operations
+- Do not override explicit utility, gas, exhaust, floor-trap, or grease-trap inputs.
+- If the photo suggests a mismatch with the user input, describe it as a risk in zoneInsights."""
 
     def parse_response(self, raw_llm_output: str) -> dict:
         try:

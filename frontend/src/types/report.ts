@@ -22,6 +22,15 @@ export interface ScoreComponent {
   maxScore: number;
   rationale: string;
   evidence: ScoreEvidence[];
+  assumptionsUsed?: string[];
+}
+
+export interface RiskFlag {
+  domain: string;
+  severity: "critical" | "warning" | "info";
+  message: string;
+  source?: string | null;
+  blocking: boolean;
 }
 
 export interface ScoreBreakdown {
@@ -32,6 +41,7 @@ export interface ScoreBreakdown {
   totalScore: number;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   components: ScoreComponent[];
+  riskFlags: RiskFlag[];
 }
 
 export interface SourceLink {

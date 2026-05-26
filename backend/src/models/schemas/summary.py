@@ -16,6 +16,15 @@ class ScoreComponent(BaseModel):
     maxScore: int = Field(gt=0)
     rationale: str
     evidence: list[ScoreEvidence] = Field(default_factory=list)
+    assumptionsUsed: list[str] = Field(default_factory=list)
+
+
+class RiskFlag(BaseModel):
+    domain: str
+    severity: Literal["critical", "warning", "info"]
+    message: str
+    source: str | None = None
+    blocking: bool = False
 
 
 class ScoreBreakdown(BaseModel):
@@ -26,6 +35,7 @@ class ScoreBreakdown(BaseModel):
     totalScore: int = Field(ge=0, le=100)
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
     components: list[ScoreComponent]
+    riskFlags: list[RiskFlag] = Field(default_factory=list)
 
 
 class Summary(BaseModel):

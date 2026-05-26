@@ -87,8 +87,8 @@ export function useWhatIf(
   );
 
   const rentPressure = useMemo(
-    () => calculateRentPressure(profitInput.baseRent, result.netRevenue),
-    [profitInput.baseRent, result.netRevenue]
+    () => calculateRentPressure(profitInput.baseRent, result.grossRevenue),
+    [profitInput.baseRent, result.grossRevenue]
   );
 
   return { sliders, setSlider, result, paybackMonths, rentPressure };
