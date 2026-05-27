@@ -9,7 +9,7 @@ class Competitor(BaseModel):
     lng: float
     type: str
     distanceMeters: int
-    threatLevel: str = Field(..., pattern="^(HIGH|MEDIUM|LOW)$")
+    proximityLevel: str = Field(..., pattern="^(HIGH|MEDIUM|LOW)$")
 
 
 class MapData(BaseModel):

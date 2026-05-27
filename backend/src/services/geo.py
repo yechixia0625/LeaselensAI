@@ -97,7 +97,7 @@ class GeoService:
                     "lng": lng,
                     "type": place.get("primaryType", "business"),
                     "distanceMeters": distance,
-                    "threatLevel": self._proximity_level(distance),
+                    "proximityLevel": self._proximity_level(distance),
                 }
             )
         return {

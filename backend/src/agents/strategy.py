@@ -47,7 +47,8 @@ Evaluate this commercial lease opportunity:
 - Wastewater readiness: {intake.wastewater_readiness}
 - Approved use status: {intake.approved_use_status}
 
-Generate a strategic summary with verdict. Return ONLY valid JSON matching this structure:
+Produce an advisory screening signal. The final numeric lease score is calculated
+separately from structured inputs and verified data. Return ONLY valid JSON matching this structure:
 {{
   "summary": {{
     "score": <0-100 overall score>,
@@ -96,10 +97,10 @@ not a substitute for professional approval."""
         yield self._make_log("Evaluating market conditions...")
         raw = await llm_service.complete(prompt)
 
-        yield self._make_log("Computing verdict score...")
+        yield self._make_log("Preparing advisory screening notes...")
         result = self.parse_response(raw)
 
-        yield self._make_log("Strategic analysis complete.", status="done")
+        yield self._make_log("Strategic advisory complete.", status="done")
         yield AgentLogEvent(
             agent=self.name,
             label=self.display_label,

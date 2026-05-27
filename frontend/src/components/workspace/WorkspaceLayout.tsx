@@ -11,7 +11,6 @@ import { useWhatIf } from "@/hooks/useWhatIf";
 import type { AnalysisIntake } from "@/services/intakeTransfer";
 import type { AgentLogEvent } from "@/types/streaming";
 import { ScoreBreakdownPanel } from "./ScoreBreakdownPanel";
-import { LocationRecommendations } from "./LocationRecommendations";
 
 interface WorkspaceLayoutProps {
   intake: AnalysisIntake;
@@ -46,6 +45,7 @@ export function WorkspaceLayout({
       expectedTraffic: report?.financialModel.expectedTraffic ?? 120,
       averageSpend: report?.financialModel.averageSpend ?? 35,
       conversionRate: report?.financialModel.conversionRate ?? 0.08,
+      demandBasis: report?.financialModel.demandBasis ?? "estimated_foot_traffic",
       grossMargin: report?.financialModel.grossMargin ?? 0.65,
       baseRent: occupancyCost,
       fixedCostNonRent: nonOccupancyCost,
@@ -127,7 +127,6 @@ export function WorkspaceLayout({
                   report.financialModel.initialDecorationCost
                 }
               />
-              <LocationRecommendations locations={report.recommendedLocations} />
             </>
           ) : (
             <div className="p-4 font-mono text-xs text-zinc-500">
@@ -141,6 +140,7 @@ export function WorkspaceLayout({
       <div className="h-24 border-t border-zinc-800 shrink-0">
         {report && <SliderControls
           expectedTraffic={whatIf.sliders.expectedTraffic}
+          demandBasis={report.financialModel.demandBasis}
           averageSpend={whatIf.sliders.averageSpend}
           baseRent={whatIf.sliders.baseRent}
           onTrafficChange={(v) => whatIf.setSlider("expectedTraffic", v)}

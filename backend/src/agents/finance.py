@@ -60,7 +60,7 @@ Consider industry benchmarks for {intake.business_type} businesses.
 When the user supplied a financial assumption above, preserve it instead of overwriting it.
 Be realistic with traffic and conversion estimates."""
 
-    def parse_response(self, raw_llm_output: str) -> dict:
+    def parse_response(self, raw_llm_output: str, intake: SpaceIntakeRequest) -> dict:
         try:
             match = re.search(r"\{[\s\S]*\}", raw_llm_output)
             if not match:
@@ -69,18 +69,19 @@ Be realistic with traffic and conversion estimates."""
             model = FinancialModel.model_validate(data["financialModel"])
             return {"financialModel": model.model_dump()}
         except (json.JSONDecodeError, KeyError, ValidationError, ValueError):
-            return self._fallback_financial()
+            return self._fallback_financial(intake)
 
-    def _fallback_financial(self) -> dict:
+    def _fallback_financial(self, intake: SpaceIntakeRequest) -> dict:
         return {
             "financialModel": {
-                "baseRent": 5200,
+                "baseRent": intake.expected_rent,
                 "expectedTraffic": 120,
                 "conversionRate": 0.08,
                 "averageSpend": 35,
                 "grossMargin": 0.65,
                 "fixedCostNonRent": 2000,
                 "initialDecorationCost": 45000,
+                "estimateStatus": "fallback",
             }
         }
 
@@ -94,7 +95,7 @@ Be realistic with traffic and conversion estimates."""
         raw = await llm_service.complete(prompt)
 
         yield self._make_log("Computing cost structures...")
-        result = self.parse_response(raw)
+        result = self.parse_response(raw, intake)
 
         yield self._make_log("Financial analysis complete.", status="done")
         yield AgentLogEvent(

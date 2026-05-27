@@ -44,12 +44,12 @@ async def test_login_rejects_bad_password(client):
 
 @pytest.mark.asyncio
 async def test_session_reports_authenticated(client):
-    login = await client.post(
+    await client.post(
         "/api/auth/login",
         json={"username": "demo", "password": "secret-pass"},
     )
 
-    response = await client.get("/api/auth/session", cookies=login.cookies)
+    response = await client.get("/api/auth/session")
 
     assert response.status_code == 200
     assert response.json()["authenticated"] is True
@@ -66,3 +66,10 @@ async def test_session_reports_unauthenticated_without_cookie(client):
         "username": None,
         "authEnabled": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_saved_reports_require_demo_auth(client):
+    response = await client.get("/api/v1/reports/1")
+
+    assert response.status_code == 401

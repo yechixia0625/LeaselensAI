@@ -4,7 +4,7 @@ export interface Competitor {
   lng: number;
   type: string;
   distanceMeters: number;
-  threatLevel: "HIGH" | "MEDIUM" | "LOW";
+  proximityLevel: "HIGH" | "MEDIUM" | "LOW";
 }
 
 export interface MapData {

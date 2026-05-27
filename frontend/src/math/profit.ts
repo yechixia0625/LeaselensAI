@@ -2,6 +2,7 @@ export interface ProfitInput {
   expectedTraffic: number;
   averageSpend: number;
   conversionRate: number;
+  demandBasis: "estimated_foot_traffic" | "paying_customers";
   grossMargin: number;
   baseRent: number;
   fixedCostNonRent: number;
@@ -17,11 +18,15 @@ export interface ProfitResult {
 
 /**
  * Core profit formula:
- * Net Profit = (DailyTraffic * 30 * Spend * Conversion * GrossMargin) - Rent - Fixed Costs
+ * A declared paying-customer count is already converted; estimated foot traffic
+ * is converted using the supplied conversion rate.
  */
 export function calculateProfit(input: ProfitInput): ProfitResult {
   const monthlyTraffic = input.expectedTraffic * 30;
-  const payingCustomers = monthlyTraffic * input.conversionRate;
+  const payingCustomers =
+    input.demandBasis === "paying_customers"
+      ? monthlyTraffic
+      : monthlyTraffic * input.conversionRate;
   const grossRevenue = payingCustomers * input.averageSpend;
   const netRevenue = grossRevenue * input.grossMargin;
   const netProfit = netRevenue - input.baseRent - input.fixedCostNonRent;

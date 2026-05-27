@@ -28,10 +28,10 @@ class RiskFlag(BaseModel):
 
 
 class ScoreBreakdown(BaseModel):
-    fixedScore: int = Field(ge=0, le=60)
-    maxFixedScore: int = 60
+    fixedScore: int = Field(ge=0, le=100)
+    maxFixedScore: int = 100
     llmScore: int = Field(ge=0, le=40)
-    maxLlmScore: int = 40
+    maxLlmScore: int = Field(ge=0, le=40)
     totalScore: int = Field(ge=0, le=100)
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
     components: list[ScoreComponent]

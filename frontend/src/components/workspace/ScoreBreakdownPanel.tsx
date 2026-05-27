@@ -12,7 +12,6 @@ export function ScoreBreakdownPanel({ summary }: ScoreBreakdownPanelProps) {
   const fixedPercent = breakdown
     ? (breakdown.fixedScore / breakdown.maxFixedScore) * 100
     : summary.score;
-  const llmPercent = breakdown ? (breakdown.llmScore / breakdown.maxLlmScore) * 100 : 0;
   const displayedRiskFlags = breakdown ? sortRiskFlags(breakdown.riskFlags).slice(0, 6) : [];
 
   return (
@@ -44,18 +43,11 @@ export function ScoreBreakdownPanel({ summary }: ScoreBreakdownPanelProps) {
       {breakdown && (
         <div className="mt-4 space-y-3">
           <ScoreBar
-            label="Fixed model"
+            label="Traceable model"
             value={breakdown.fixedScore}
             max={breakdown.maxFixedScore}
             percent={fixedPercent}
             tone="bg-lime-300"
-          />
-          <ScoreBar
-            label="LLM review"
-            value={breakdown.llmScore}
-            max={breakdown.maxLlmScore}
-            percent={llmPercent}
-            tone="bg-sky-300"
           />
 
           <div className="space-y-2 pt-2">

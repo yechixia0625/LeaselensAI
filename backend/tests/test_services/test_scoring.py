@@ -1,5 +1,5 @@
 from src.models.schemas.intake import SpaceIntakeRequest
-from src.services.scoring import enrich_summary
+from src.services.scoring import enrich_summary, recommend_locations
 
 
 def make_intake(**overrides):
@@ -40,7 +40,7 @@ def available_map_data():
             {
                 "name": "Nearby Cafe",
                 "distanceMeters": 120,
-                "threatLevel": "MEDIUM",
+                "proximityLevel": "MEDIUM",
             }
         ],
     }
@@ -114,3 +114,112 @@ def test_unknown_building_services_lower_confidence_without_blocking():
     assert any(flag["severity"] == "info" for flag in breakdown["riskFlags"])
     assert not any(flag["blocking"] for flag in breakdown["riskFlags"])
     assert breakdown["components"][1]["key"] == "building_services_readiness"
+
+
+def test_declared_daily_customers_are_not_multiplied_by_conversion_rate():
+    financial_model = base_financial_model(conversionRate=0.12)
+    enrich_summary(
+        make_intake(
+            expected_daily_customers=100,
+            average_spend=20,
+            gross_margin=0.5,
+            fitout_budget=0,
+            staffing_monthly=0,
+            utilities_monthly_estimate=0,
+        ),
+        financial_model,
+        available_map_data(),
+        {"score": 70},
+    )
+
+    assert financial_model["expectedTraffic"] == 100
+    assert financial_model["conversionRate"] == 1.0
+    assert financial_model["demandBasis"] == "paying_customers"
+
+
+def test_llm_score_does_not_change_deterministic_total():
+    low = enrich_summary(make_intake(), base_financial_model(), available_map_data(), {"score": 0})
+    high = enrich_summary(
+        make_intake(), base_financial_model(), available_map_data(), {"score": 100}
+    )
+
+    assert low["score"] == high["score"]
+    assert low["scoreBreakdown"]["maxFixedScore"] == 100
+    assert low["scoreBreakdown"]["maxLlmScore"] == 0
+
+
+def test_llm_financial_guesses_do_not_change_benchmark_based_score():
+    baseline_model = base_financial_model()
+    inflated_model = base_financial_model(
+        expectedTraffic=5000,
+        conversionRate=0.8,
+        averageSpend=200,
+        grossMargin=0.95,
+        fixedCostNonRent=1,
+        initialDecorationCost=1,
+    )
+
+    baseline = enrich_summary(make_intake(), baseline_model, available_map_data(), {"score": 70})
+    inflated = enrich_summary(make_intake(), inflated_model, available_map_data(), {"score": 70})
+
+    assert baseline["score"] == inflated["score"]
+    assert baseline_model["expectedTraffic"] == inflated_model["expectedTraffic"]
+    assert baseline_model["averageSpend"] == inflated_model["averageSpend"]
+
+
+def test_non_fnb_does_not_receive_fnb_utility_risk_flags():
+    summary = enrich_summary(
+        make_intake(
+            business_type="Boutique",
+            cooking_intensity="none",
+            has_floor_trap="unknown",
+            has_grease_trap="unknown",
+            has_exhaust="unknown",
+            has_gas="unknown",
+            wastewater_readiness="unknown",
+        ),
+        base_financial_model(),
+        available_map_data(),
+        {"score": 70},
+    )
+
+    messages = [flag["message"].lower() for flag in summary["scoreBreakdown"]["riskFlags"]]
+    assert not any(
+        "grease" in message or "exhaust" in message or "floor trap" in message
+        for message in messages
+    )
+
+
+def test_static_candidate_pool_is_not_exposed_as_location_recommendations():
+    locations = recommend_locations(make_intake(), available_map_data(), {"score": 72})
+
+    assert locations == []
+
+
+def test_fallback_financial_estimates_lower_confidence():
+    summary = enrich_summary(
+        make_intake(
+            business_type="Boutique",
+            cooking_intensity="none",
+            electrical_readiness="yes",
+            layout_shape="regular",
+            signage_visibility="yes",
+            loading_access="yes",
+            toilet_access="yes",
+            approved_use_status="confirmed",
+        ),
+        base_financial_model(
+            estimateStatus="fallback",
+            expectedTraffic=1000,
+            conversionRate=0.5,
+            averageSpend=100,
+        ),
+        available_map_data(),
+        {"score": 70},
+    )
+
+    assert summary["scoreBreakdown"]["confidence"] == "LOW"
+    assert any(
+        "fallback benchmarks" in flag["message"]
+        for flag in summary["scoreBreakdown"]["riskFlags"]
+    )

@@ -4,6 +4,7 @@ import * as Slider from "@radix-ui/react-slider";
 
 interface SliderControlsProps {
   expectedTraffic: number;
+  demandBasis: "estimated_foot_traffic" | "paying_customers";
   averageSpend: number;
   baseRent: number;
   onTrafficChange: (value: number) => void;
@@ -16,6 +17,7 @@ interface SliderControlsProps {
 
 export function SliderControls({
   expectedTraffic,
+  demandBasis,
   averageSpend,
   baseRent,
   onTrafficChange,
@@ -31,7 +33,7 @@ export function SliderControls({
       <div className="flex-1 space-y-1">
         <div className="flex items-center justify-between">
           <span className="text-xs font-mono text-zinc-500 uppercase">
-            Expected Traffic
+            {demandBasis === "paying_customers" ? "Daily Customers" : "Expected Traffic"}
           </span>
           <span className="text-xs font-mono text-white tabular-nums">
             {expectedTraffic}/day

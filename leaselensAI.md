@@ -97,7 +97,7 @@ The Python backend must ultimately generate and stream this exact JSON structure
   "mapData": {
     "center": [31.2304, 121.4737],
     "competitors": [
-      { "name": "Starbucks", "lat": 31.2310, "lng": 121.4740, "type": "coffee", "threatLevel": "HIGH" }
+      { "name": "Starbucks", "lat": 31.2310, "lng": 121.4740, "type": "coffee", "proximityLevel": "HIGH" }
     ]
   }
 }

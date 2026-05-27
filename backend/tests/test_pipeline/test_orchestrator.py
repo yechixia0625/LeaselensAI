@@ -24,7 +24,7 @@ class FakeGeo:
                     "lng": intake.longitude,
                     "type": "cafe",
                     "distanceMeters": 111,
-                    "threatLevel": "HIGH",
+                    "proximityLevel": "HIGH",
                 }
             ],
         }
@@ -101,7 +101,7 @@ async def test_report_is_last_raw_sse_data_frame(fake_intake):
     payloads = [json.loads(chunk.split("data: ", 1)[1]) for chunk in chunks]
 
     assert chunks[-1].startswith("data: ")
-    assert payloads[-1]["summary"]["verdict"] == "APPROVED WITH CONDITIONS"
+    assert payloads[-1]["summary"]["verdict"] == "APPROVED"
     assert "event" not in payloads[-1]
     assert payloads[-1]["mapData"]["competitors"][0]["name"] == "Verified Cafe"
     assert all(payload["event"] == "agent_log" for payload in payloads[:-1])
@@ -132,20 +132,19 @@ async def test_report_includes_fixed_llm_score_breakdown_and_recommendations(fak
     payload = json.loads(chunks[-1].split("data: ", 1)[1])
 
     breakdown = payload["summary"]["scoreBreakdown"]
-    assert breakdown["maxFixedScore"] == 60
-    assert breakdown["maxLlmScore"] == 40
-    assert 0 <= breakdown["fixedScore"] <= 60
-    assert 0 <= breakdown["llmScore"] <= 40
+    assert breakdown["maxFixedScore"] == 100
+    assert breakdown["maxLlmScore"] == 0
+    assert 0 <= breakdown["fixedScore"] <= 100
+    assert breakdown["llmScore"] == 0
     assert payload["summary"]["score"] == breakdown["totalScore"]
     assert sum(component["maxScore"] for component in breakdown["components"]) == 60
-    assert len(payload["recommendedLocations"]) == 3
-    assert all(location["country"] == "Singapore" for location in payload["recommendedLocations"])
+    assert payload["recommendedLocations"] == []
 
 
 @pytest.mark.asyncio
-async def test_strategy_llm_score_is_clamped_to_forty_points(fake_intake):
+async def test_strategy_llm_score_does_not_change_traceable_total(fake_intake):
     chunks = await collect_chunks(AnalysisOrchestrator(OverconfidentLLM(), FakeGeo()), fake_intake)
     payload = json.loads(chunks[-1].split("data: ", 1)[1])
 
-    assert payload["summary"]["scoreBreakdown"]["llmScore"] == 40
+    assert payload["summary"]["scoreBreakdown"]["llmScore"] == 0
     assert payload["summary"]["score"] <= 100

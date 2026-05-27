@@ -2,8 +2,6 @@ from typing import Any
 
 from src.models.schemas.intake import SpaceIntakeRequest
 
-SQM_PER_SQFT = 0.092903
-
 FNB_TERMS = ("cafe", "coffee", "bakery", "restaurant", "bar", "food", "bistro")
 
 INDUSTRY_PROFILES = {
@@ -102,23 +100,37 @@ def enrich_summary(
     intake: SpaceIntakeRequest,
     financial_model: dict[str, Any],
     map_data: dict[str, Any],
-    llm_summary: dict[str, Any],
+    _llm_summary: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the final 60/40 score contract from deterministic and LLM inputs."""
+    """Build a traceable score from structured inputs and verified map availability."""
     metrics = _financial_metrics(intake, financial_model)
     flags: list[dict[str, Any]] = []
+    if financial_model.get("estimateStatus") == "fallback":
+        _add_flag(
+            flags,
+            "finance",
+            "warning",
+            "Financial estimates use fallback benchmarks because model output was unavailable.",
+            "fallback_financial_model",
+        )
+    elif financial_model.get("estimateStatus") == "benchmark":
+        _add_flag(
+            flags,
+            "finance",
+            "info",
+            "Missing financial inputs were filled using industry benchmark assumptions.",
+            "industry_benchmark",
+        )
     components = [
         _finance_component(intake, metrics, flags),
         _building_component(intake, flags),
         _regulatory_component(intake, flags),
         _location_component(intake, map_data, flags),
     ]
-    fixed_score = int(_clamp(round(sum(component["score"] for component in components)), 0, 60))
-
-    llm_raw_score = _number(llm_summary.get("score"), 70)
-    llm_score = int(_clamp(round(_clamp(llm_raw_score, 0, 100) * 0.4), 0, 40))
-
-    total_score = int(_clamp(fixed_score + llm_score, 0, 100))
+    component_score = sum(component["score"] for component in components)
+    fixed_score = int(_clamp(round(component_score / 60 * 100), 0, 100))
+    llm_score = 0
+    total_score = fixed_score
     blocking = any(flag["blocking"] for flag in flags if flag["severity"] == "critical")
     return {
         "score": total_score,
@@ -126,9 +138,9 @@ def enrich_summary(
         "paybackMonths": metrics["paybackMonths"],
         "scoreBreakdown": {
             "fixedScore": fixed_score,
-            "maxFixedScore": 60,
+            "maxFixedScore": 100,
             "llmScore": llm_score,
-            "maxLlmScore": 40,
+            "maxLlmScore": 0,
             "totalScore": total_score,
             "confidence": _confidence(map_data, flags),
             "components": components,
@@ -138,50 +150,12 @@ def enrich_summary(
 
 
 def recommend_locations(
-    intake: SpaceIntakeRequest,
-    map_data: dict[str, Any],
-    summary: dict[str, Any],
+    _intake: SpaceIntakeRequest,
+    _map_data: dict[str, Any],
+    _summary: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Return three Singapore candidate locations with verifiable public sources."""
-    normalized = intake.business_type.strip().lower()
-    candidate_pool = _candidate_pool(normalized)
-    base_score = _number(summary.get("score"), 70)
-    competitors = len(map_data.get("competitors", []))
-    risk_flags = summary.get("scoreBreakdown", {}).get("riskFlags", [])
-    critical_penalty = 8 * sum(1 for flag in risk_flags if flag.get("severity") == "critical")
-
-    recommendations = []
-    for candidate in candidate_pool[:3]:
-        monthly_rent = _estimated_monthly_rent(candidate["rent_psf"], intake.square_meters)
-        rent_penalty = 5 if monthly_rent > max(intake.expected_rent * 1.8, 1) else 0
-        adjusted_score = (
-            base_score
-            + candidate["score_delta"]
-            - competitors
-            - critical_penalty
-            - rent_penalty
-        )
-        score = int(_clamp(adjusted_score, 35, 95))
-        recommendations.append(
-            {
-                "name": candidate["name"],
-                "address": candidate["address"],
-                "country": "Singapore",
-                "area": candidate["area"],
-                "lat": candidate["lat"],
-                "lng": candidate["lng"],
-                "score": score,
-                "rentBenchmark": (
-                    f"~S${candidate['rent_psf']}/sqft/month public market proxy"
-                ),
-                "estimatedMonthlyRent": monthly_rent,
-                "nearbySignals": candidate["nearby_signals"],
-                "pros": candidate["pros"],
-                "cons": candidate["cons"],
-                "sourceLinks": _source_links(candidate),
-            }
-        )
-    return recommendations
+    """Return no alternatives until candidate-specific market data is queried."""
+    return []
 
 
 def _financial_metrics(
@@ -189,12 +163,16 @@ def _financial_metrics(
     financial_model: dict[str, Any],
 ) -> dict[str, float]:
     profile = _industry_profile(intake.business_type)
-    traffic = intake.expected_daily_customers or int(
-        _number(financial_model.get("expectedTraffic"), profile["traffic"])
-    )
-    conversion = _number(financial_model.get("conversionRate"), 0.08)
-    spend = intake.average_spend or _number(financial_model.get("averageSpend"), profile["spend"])
-    margin = intake.gross_margin or _number(financial_model.get("grossMargin"), profile["margin"])
+    if intake.expected_daily_customers is not None:
+        traffic = intake.expected_daily_customers
+        conversion = 1.0
+        demand_basis = "paying_customers"
+    else:
+        traffic = int(profile["traffic"])
+        conversion = 0.08
+        demand_basis = "estimated_foot_traffic"
+    spend = intake.average_spend or profile["spend"]
+    margin = intake.gross_margin or profile["margin"]
     rent = intake.expected_rent
     lease_term = float(intake.lease_term_months or 36)
     rent_free = min(float(intake.rent_free_months), max(lease_term - 1, 0))
@@ -213,13 +191,26 @@ def _financial_metrics(
     else:
         utilities = 0.0
         staffing = 0.0
-        base_non_rent_operating = _number(
-            financial_model.get("fixedCostNonRent"),
-            profile["utilities"] + profile["staffing"],
-        )
+        base_non_rent_operating = profile["utilities"] + profile["staffing"]
     fitout = intake.fitout_budget
     if fitout is None:
-        fitout = _number(financial_model.get("initialDecorationCost"), profile["fitout"])
+        fitout = profile["fitout"]
+
+    supplied_financial_inputs = all(
+        value is not None
+        for value in (
+            intake.expected_daily_customers,
+            intake.average_spend,
+            intake.gross_margin,
+            intake.utilities_monthly_estimate,
+            intake.staffing_monthly,
+            intake.fitout_budget,
+        )
+    )
+    if financial_model.get("estimateStatus") != "fallback":
+        financial_model["estimateStatus"] = (
+            "user_inputs" if supplied_financial_inputs else "benchmark"
+        )
 
     total_occupancy = (
         effective_rent + intake.service_charge_monthly + intake.other_monthly_costs
@@ -248,6 +239,8 @@ def _financial_metrics(
         {
             "baseRent": rent,
             "expectedTraffic": int(traffic),
+            "conversionRate": conversion,
+            "demandBasis": demand_basis,
             "averageSpend": spend,
             "grossMargin": margin,
             "fixedCostNonRent": round(monthly_operating_cost - total_occupancy, 2),
@@ -302,7 +295,7 @@ def _finance_component(
     if intake.lease_term_months is None:
         assumptions.append("Lease term defaulted to 36 months.")
     if intake.fitout_budget is None:
-        assumptions.append("Fit-out budget defaulted from industry benchmark or LLM output.")
+        assumptions.append("Fit-out budget defaulted from industry benchmark.")
     if intake.utilities_monthly_estimate is None and using_detailed_costs:
         assumptions.append("Utilities estimate defaulted from industry benchmark.")
     if intake.staffing_monthly is None and using_detailed_costs:
@@ -367,21 +360,35 @@ def _building_component(
     is_fnb = _is_fnb(intake.business_type)
     full_cooking = intake.cooking_intensity == "full"
     light_or_full = intake.cooking_intensity in {"light", "full"}
-    checks = [
-        ("Water supply", intake.has_water_supply, 2.0, "SFA food shop licensing readiness"),
-        ("Electrical readiness", intake.electrical_readiness, 2.0, "EMA licensed worker check"),
-        ("Floor trap", intake.has_floor_trap, 2.0, "PUB used-water readiness"),
-        ("Wastewater readiness", intake.wastewater_readiness, 2.0, "PUB sanitary readiness"),
-        ("Grease trap", intake.has_grease_trap, 3.0 if light_or_full else 1.0, "PUB grease trap"),
-        (
-            "Kitchen exhaust",
-            intake.has_exhaust,
-            3.0 if full_cooking else 1.0,
-            "SCDF kitchen exhaust",
-        ),
-        ("Gas readiness", intake.has_gas, 1.0 if full_cooking else 0.5, "EMA gas worker check"),
-        ("Layout shape", _layout_status(intake.layout_shape), 1.0, "architectural fit"),
-    ]
+    if is_fnb:
+        checks = [
+            ("Water supply", intake.has_water_supply, 2.0, "SFA food shop licensing readiness"),
+            ("Electrical readiness", intake.electrical_readiness, 2.0, "EMA licensed worker check"),
+            ("Floor trap", intake.has_floor_trap, 2.0, "PUB used-water readiness"),
+            ("Wastewater readiness", intake.wastewater_readiness, 2.0, "PUB sanitary readiness"),
+            (
+                "Grease trap",
+                intake.has_grease_trap,
+                3.0 if light_or_full else 1.0,
+                "PUB grease trap",
+            ),
+            (
+                "Kitchen exhaust",
+                intake.has_exhaust,
+                3.0 if full_cooking else 1.0,
+                "SCDF kitchen exhaust",
+            ),
+            ("Gas readiness", intake.has_gas, 1.0 if full_cooking else 0.5, "EMA gas worker check"),
+            ("Layout shape", _layout_status(intake.layout_shape), 1.0, "architectural fit"),
+        ]
+    else:
+        checks = [
+            ("Electrical readiness", intake.electrical_readiness, 4.0, "electrical readiness"),
+            ("Layout shape", _layout_status(intake.layout_shape), 4.0, "architectural fit"),
+            ("Signage visibility", intake.signage_visibility, 4.0, "retail visibility"),
+            ("Loading access", intake.loading_access, 2.0, "operating access"),
+            ("Toilet access", intake.toilet_access, 2.0, "customer amenity"),
+        ]
     score = 0.0
     assumptions = []
     for label, status, weight, source in checks:
@@ -516,7 +523,8 @@ def _regulatory_component(
             "BCA/HDB A&A screening",
         )
     score += 1.5 if intake.electrical_readiness == "yes" else 0.8
-    score += 1.0 if intake.has_gas in {"yes", "unknown"} else 0.3
+    if is_fnb:
+        score += 1.0 if intake.has_gas in {"yes", "unknown"} else 0.3
 
     return {
         "key": "regulatory_and_approval_risk",
@@ -548,7 +556,7 @@ def _location_component(
     in_singapore = 1.15 <= intake.latitude <= 1.48 and 103.55 <= intake.longitude <= 104.1
     available = map_data.get("status") == "available"
     competitors = map_data.get("competitors", [])
-    high_threats = sum(1 for item in competitors if item.get("threatLevel") == "HIGH")
+    high_proximity = sum(1 for item in competitors if item.get("proximityLevel") == "HIGH")
     count = len(competitors)
     score = 0.0
     score += 4 if in_singapore else 1
@@ -562,7 +570,7 @@ def _location_component(
         score += 3
     else:
         score += 1.5
-    score -= min(high_threats, 3) * 0.7
+    score -= min(high_proximity, 3) * 0.7
 
     if not in_singapore:
         _add_flag(
@@ -599,136 +607,13 @@ def _location_component(
                 "source": "google_places",
             },
             {
-                "label": "High proximity threats",
-                "value": str(high_threats),
+                "label": "Locations within high proximity band",
+                "value": str(high_proximity),
                 "source": "google_places",
             },
         ],
         "assumptionsUsed": [],
     }
-
-
-def _candidate_pool(normalized_business_type: str) -> list[dict[str, Any]]:
-    food = [
-        {
-            "name": "Tanjong Pagar Centre retail podium",
-            "address": "7 Wallich Street, Singapore 078884",
-            "area": "Tanjong Pagar",
-            "lat": 1.2764,
-            "lng": 103.8459,
-            "rent_psf": 18,
-            "score_delta": 8,
-            "nearby_signals": ["CBD lunch crowd", "MRT interchange access", "office density"],
-            "pros": ["Strong weekday footfall", "Premium visibility for coffee or quick service"],
-            "cons": ["Higher rent pressure", "Weekend demand can be softer"],
-        },
-        {
-            "name": "Holland Village shophouse cluster",
-            "address": "Lorong Mambong, Singapore 277700",
-            "area": "Holland Village",
-            "lat": 1.3111,
-            "lng": 103.7948,
-            "rent_psf": 15,
-            "score_delta": 6,
-            "nearby_signals": ["F&B cluster", "expat catchment", "evening demand"],
-            "pros": ["Established cafe and restaurant destination", "Good lifestyle positioning"],
-            "cons": ["Competitive F&B cluster", "Unit frontage matters a lot"],
-        },
-        {
-            "name": "Bugis / Haji Lane street retail",
-            "address": "21 Haji Lane, Singapore 189214",
-            "area": "Bugis",
-            "lat": 1.3008,
-            "lng": 103.8591,
-            "rent_psf": 14,
-            "score_delta": 5,
-            "nearby_signals": ["tourist traffic", "indie retail cluster", "MRT proximity"],
-            "pros": ["Strong discovery traffic", "Works well for distinctive concepts"],
-            "cons": ["Narrow units can constrain operations", "Peak periods are uneven"],
-        },
-    ]
-    retail = [
-        {
-            "name": "ION Orchard retail catchment",
-            "address": "2 Orchard Turn, Singapore 238801",
-            "area": "Orchard",
-            "lat": 1.3040,
-            "lng": 103.8320,
-            "rent_psf": 24,
-            "score_delta": 5,
-            "nearby_signals": ["prime retail spine", "tourist traffic", "MRT access"],
-            "pros": ["Best-in-class visibility", "Strong comparison shopping demand"],
-            "cons": ["Very high rental hurdle", "Brand differentiation must be clear"],
-        },
-        {
-            "name": "Funan urban retail cluster",
-            "address": "107 North Bridge Road, Singapore 179105",
-            "area": "City Hall",
-            "lat": 1.2913,
-            "lng": 103.8499,
-            "rent_psf": 17,
-            "score_delta": 7,
-            "nearby_signals": ["office crowd", "civic district", "mall traffic"],
-            "pros": ["Balanced weekday and weekend demand", "Good for design-led retail"],
-            "cons": ["Mall tenant mix can limit category freedom", "Fit-out rules may be strict"],
-        },
-        {
-            "name": "Tiong Bahru neighbourhood retail",
-            "address": "Tiong Bahru Road, Singapore 168732",
-            "area": "Tiong Bahru",
-            "lat": 1.2852,
-            "lng": 103.8320,
-            "rent_psf": 13,
-            "score_delta": 6,
-            "nearby_signals": ["residential catchment", "heritage shops", "cafe culture"],
-            "pros": ["Neighbourhood loyalty potential", "Lower rent than prime malls"],
-            "cons": ["Smaller catchment than CBD", "Concept must fit local community"],
-        },
-    ]
-    general = [
-        {
-            "name": "Paya Lebar Quarter retail",
-            "address": "10 Paya Lebar Road, Singapore 409057",
-            "area": "Paya Lebar",
-            "lat": 1.3175,
-            "lng": 103.8927,
-            "rent_psf": 16,
-            "score_delta": 7,
-            "nearby_signals": ["MRT interchange", "office and residential mix", "mall traffic"],
-            "pros": ["Balanced weekday/weekend catchment", "Good accessibility"],
-            "cons": ["Competes with mall tenants", "Rent still needs careful negotiation"],
-        },
-        food[0],
-        retail[2],
-    ]
-    if _is_fnb(normalized_business_type):
-        return food
-    if any(term in normalized_business_type for term in ("retail", "boutique", "book", "shop")):
-        return retail
-    return general
-
-
-def _source_links(candidate: dict[str, Any]) -> list[dict[str, str]]:
-    query = candidate["address"].replace(" ", "+")
-    return [
-        {
-            "label": "Google Maps",
-            "url": f"https://www.google.com/maps/search/?api=1&query={query}",
-        },
-        {
-            "label": "OneMap APIs",
-            "url": "https://www.onemap.gov.sg/docs/",
-        },
-        {
-            "label": "Data.gov.sg retail rentals",
-            "url": "https://data.gov.sg/dataset/median-rentals-and-vacancy-of-retail-space",
-        },
-        {
-            "label": "HDB commercial renting",
-            "url": "https://www.hdb.gov.sg/shops-and-offices/renting-from-hdb",
-        },
-        {"label": "JTC Find Space", "url": "https://www.jtc.gov.sg/find-space"},
-    ]
 
 
 def _industry_profile(business_type: str) -> dict[str, float]:
@@ -770,11 +655,6 @@ def _readiness_points(status: str, weight: float) -> float:
     return 0.0
 
 
-def _estimated_monthly_rent(rent_psf: float, square_meters: float) -> float:
-    square_feet = square_meters / SQM_PER_SQFT
-    return round(rent_psf * square_feet, 2)
-
-
 def _payback_months(initial_cost: float, monthly_net_profit: float) -> float:
     if monthly_net_profit <= 0:
         return 999.0
@@ -783,6 +663,8 @@ def _payback_months(initial_cost: float, monthly_net_profit: float) -> float:
 
 def _confidence(map_data: dict[str, Any], flags: list[dict[str, Any]]) -> str:
     if any(flag["severity"] == "critical" for flag in flags):
+        return "LOW"
+    if any(flag.get("source") == "fallback_financial_model" for flag in flags):
         return "LOW"
     unknown_flags = sum(1 for flag in flags if flag["severity"] == "info")
     if map_data.get("status") != "available":
@@ -821,11 +703,6 @@ def _add_flag(
         flags.append(candidate)
 
 
-def _number(value: Any, fallback: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return fallback
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

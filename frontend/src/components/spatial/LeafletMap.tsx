@@ -8,9 +8,9 @@ interface LeafletMapProps {
   mapData: MapData;
 }
 
-function markerColor(threatLevel: Competitor["threatLevel"]): string {
-  if (threatLevel === "HIGH") return "#e16855";
-  if (threatLevel === "MEDIUM") return "#e4bb63";
+function markerColor(proximityLevel: Competitor["proximityLevel"]): string {
+  if (proximityLevel === "HIGH") return "#e16855";
+  if (proximityLevel === "MEDIUM") return "#e4bb63";
   return "#79a984";
 }
 
@@ -45,7 +45,7 @@ export default function LeafletMap({ mapData }: LeafletMapProps) {
               pathOptions={{
                 color: "#ffffff",
                 weight: 2,
-                fillColor: markerColor(competitor.threatLevel),
+                fillColor: markerColor(competitor.proximityLevel),
                 fillOpacity: 1,
               }}
             >
@@ -55,7 +55,7 @@ export default function LeafletMap({ mapData }: LeafletMapProps) {
                   <br />
                   {competitor.type} / {competitor.distanceMeters} M
                   <br />
-                  Proximity: {competitor.threatLevel}
+                  Proximity: {competitor.proximityLevel}
                 </span>
               </Popup>
             </CircleMarker>
